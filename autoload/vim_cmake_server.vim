@@ -43,7 +43,7 @@ endfunction
 
 function! s:open_buffer() abort
     silent exec 'belowright new ' . fnameescape(s:output_buffer_name)
-    setlocal buftype=nofile bufhidden=hide noswapfile readonly nomodifiable autoread
+    setlocal buftype=nofile bufhidden=hide noswapfile readonly nomodifiable filetype=cmake_server_messages
     wincmd p
 endfunction
 
@@ -59,11 +59,15 @@ function! s:find_or_open_buffer() abort
 endfunction
 
 function! vim_cmake_server#report_error(error_message) abort
-    echo a:error_message
+    echohl ErrorMsg
+        echomsg a:error_message
+    echohl None
 endfunction
 
-function! vim_cmake_server#update_progress(...) abort
-    echo "update_progress"
+function! vim_cmake_server#update_progress(progress_message, progress_min, progress_max, progress_current) abort
+    if exists('g:airline#extensions#vim_cmake_server#airline_progress_message')
+        let g:airline#extensions#vim_cmake_server#airline_progress_message = a:progress_message . ' ' . a:progress_current . '/' . a:progress_max
+    endif
 endfunction
 
 function! vim_cmake_server#initialize_communication(source_dir, build_dir, ...) abort
