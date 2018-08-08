@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+from collections import namedtuple
 
 __MESSAGE_PROLOG = """[== "CMake Server" ==["""
 __MESSAGE_EPILOG = """]== "CMake Server" ==]"""
@@ -11,11 +12,14 @@ class InvalidMessageError(Exception):
 class UnexpectedEOFError(Exception):
     pass
 
+
 class UnsupportedProtocolVersion(Exception):
     pass
 
+
 class RequestAlreadySentError(Exception):
     pass
+
 
 class MessageErrorResponse(Exception):
     pass
@@ -30,7 +34,7 @@ class DeserializationResult(object):
         self.message_object = message_object
         self.reason = reason
 
-from collections import namedtuple
+
 SupportedVersion = namedtuple('SupportedVersion', ['isExperimental', 'major', 'minor'])
 HelloMessage = namedtuple('HelloMessage', ['supported_versions'])
 
@@ -105,7 +109,6 @@ async def read_hello_message(messages_iterator):
     return HelloMessage(supported_versions=supported_versions)
 
 
-from collections import namedtuple
 RegisteredRequestKeyBase = namedtuple("RegisteredRequestKey", ["type", "cookie"])
 
 
@@ -137,20 +140,19 @@ class ResponseMessageIterator(object):
 
     def other_cb(self, message):
         self.messages.append(message)
+        self.message_event.set()
 
     def __aiter__(self):
         return self
 
     async def __anext__(self):
-        if len(self.messages) == 1 and self.error_received:
-            raise MessageErrorResponse(self.messages[0])
-        if not self.messages and self.response_received:
+        if not self.messages and \
+                (self.response_received or self.error_received):
             raise StopAsyncIteration
         if not self.messages:
             self.message_event.clear()
             await self.message_event.wait()
         assert self.messages
-        retval = self.messages
         return self.messages.pop(0)
 
 
@@ -172,7 +174,8 @@ class CMakeServer(object):
         request_cookie = request_object.get("cookie", "")
         key = RegisteredRequestKey(type=request_type, cookie=request_cookie)
         if key in self.registered_requests:
-            raise RequestAlreadySentError("Request (type=%s, cookie=%s) is already registered" % (request_type, request_cookie))
+            raise RequestAlreadySentError("Request (type=%s, cookie=%s) is already registered"
+                                          % (request_type, request_cookie))
         self.registered_requests[key] = RegisteredRequestValue(success_cb=success_cb,
                                                                failure_cb=failure_cb,
                                                                progress_cb=progress_cb,
@@ -181,14 +184,17 @@ class CMakeServer(object):
 
     async def _message_loop(self):
         import logging
-        cmake_messages_iterator = CMakeServerMessagesIterator(self.input_message_reader, self.message_data_processed_event)
+        cmake_messages_iterator = CMakeServerMessagesIterator(self.input_message_reader,
+                                                              self.message_data_processed_event)
         hello_message = await read_hello_message(cmake_messages_iterator)
         CMakeServer.logger.log(logging.DEBUG, "CMake server hello message: %s" % repr(hello_message))
-        if not any((supported_version.major == 1 and supported_version.minor >= 0 for supported_version in hello_message.supported_versions)):
+        if not any((supported_version.major == 1 and supported_version.minor >= 0
+                    for supported_version in hello_message.supported_versions)):
             raise UnsupportedProtocolVersion("Server doesn't support protocol version: 1.x")
         async for message_read in cmake_messages_iterator:
             CMakeServer.logger.log(logging.DEBUG, "Server message: %s" % repr(message_read))
             message_type = message_read["type"]
+
             def final_response(callback_name):
                 request_type = message_read["inReplyTo"]
                 request_cookie = message_read["cookie"]
@@ -197,7 +203,9 @@ class CMakeServer(object):
                     getattr(self.registered_requests[key], callback_name)(message_read)
                     del self.registered_requests[key]
                 else:
-                    CMakeServer.logger.log(logging.ERROR, "%s to unregistered request: %s" % (callback_name, repr(message_read)))
+                    CMakeServer.logger.log(logging.ERROR,
+                                           "%s to unregistered request: %s" % (callback_name, repr(message_read)))
+
             def message_response(callback_name):
                 request_type = message_read["inReplyTo"]
                 request_cookie = message_read["cookie"]
@@ -205,7 +213,8 @@ class CMakeServer(object):
                 if key in self.registered_requests:
                     getattr(self.registered_requests[key], callback_name)(message_read)
                 else:
-                    CMakeServer.logger.log(logging.ERROR, "%s to unregistered request: %s" % (callback_name, repr(message_read)))
+                    CMakeServer.logger.log(logging.ERROR,
+                                           "%s to unregistered request: %s" % (callback_name, repr(message_read)))
             if message_type == "signal":
                 self.signal_cb(message_read)
             elif message_type == "reply":
@@ -220,7 +229,6 @@ class CMakeServer(object):
                 print("Unknown server message type: %s (message: %s)" % (message_type, repr(message_read)))
 
     async def async_report_cmake_server_message(self, input_message):
-        import asyncio
         self.message_data_processed_event.clear()
         self.input_message_reader.feed_data(input_message)
         await self.message_data_processed_event.wait()
@@ -257,3 +265,11 @@ class CMakeServer(object):
 
     def stop_execution(self):
         self.loop_object.run_until_complete(self.async_stop_execution())
+
+
+def create_cmake_server_controller(signal_cb, loop_object=None):
+    import asyncio
+    if loop_object is None:
+        loop_object = asyncio.get_event_loop()
+    return CMakeServer(loop_object=loop_object,
+                       signal_cb=signal_cb)
