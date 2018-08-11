@@ -26,3 +26,6 @@ class Adapter(object):
 
     def post_task(self, coroutine_task):
         self._loop_object.create_task(coroutine_task)
+
+    def close(self):
+        self.cmake_server.stop_execution()
