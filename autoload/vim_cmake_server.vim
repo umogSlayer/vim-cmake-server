@@ -19,20 +19,31 @@ import os
 
 script_folder = vim.eval('s:script_folder_path')
 sys.path.insert(0, os.path.join(script_folder, '..', 'python'))
+del script_folder
+
+class MyClass(object):
+    pass
+
+vim_cmake_server = MyClass()
+del MyClass
 
 import vimadapter
+vim_cmake_server.vimadapter = vimadapter
+del vimadapter
 
-cmake_server_adapter = None
+vim_cmake_server.cmake_server_adapter = None
 
 import request
+vim_cmake_server.request = request
+del request
 EOF
 endfunction
 
 function! vim_cmake_server#vim_leave_callback() abort
     python3 <<EOF
-if cmake_server_adapter is not None:
-    cmake_server_adapter.close()
-del cmake_server_adapter
+if vim_cmake_server.cmake_server_adapter is not None:
+    vim_cmake_server.cmake_server_adapter.close()
+vim_cmake_server.cmake_server_adapter = None
 
 import asyncio
 loop_object = asyncio.get_event_loop()
@@ -45,9 +56,9 @@ endfunction
 
 function! vim_cmake_server#input_data(channel, message) abort
     python3 << EOF
-current_server_message = vim.eval('a:message')
-cmake_server_adapter.cmake_server.report_cmake_server_message(
-    current_server_message.encode("utf-8"))
+vim_cmake_server.current_server_message = vim.eval('a:message')
+vim_cmake_server.cmake_server_adapter.cmake_server.report_cmake_server_message(
+    vim_cmake_server.current_server_message.encode("utf-8"))
 EOF
 endfunction
 
@@ -127,19 +138,19 @@ function! vim_cmake_server#initialize_communication(source_dir, build_dir, ...) 
     let s:communication_is_initialized = 1
     python3 <<EOF
 
-if cmake_server_adapter is not None:
-    cmake_server_adapter.close()
+if vim_cmake_server.cmake_server_adapter is not None:
+    vim_cmake_server.cmake_server_adapter.close()
 
-cmake_server_adapter = vimadapter.Adapter()
+vim_cmake_server.cmake_server_adapter = vim_cmake_server.vimadapter.Adapter()
 
-source_dir = vim.eval("l:source_dir")
-build_dir = vim.eval("l:build_dir")
-generator = vim.eval("l:generator")
-cmake_server_adapter.post_task(
-    request.handshake(cmake_server_adapter.cmake_server,
-                      source_directory=source_dir,
-                      build_directory=build_dir,
-                      generator=generator))
+vim_cmake_server.source_dir = vim.eval("l:source_dir")
+vim_cmake_server.build_dir = vim.eval("l:build_dir")
+vim_cmake_server.generator = vim.eval("l:generator")
+vim_cmake_server.cmake_server_adapter.post_task(
+    vim_cmake_server.request.handshake(vim_cmake_server.cmake_server_adapter.cmake_server,
+                                       source_directory=vim_cmake_server.source_dir,
+                                       build_directory=vim_cmake_server.build_dir,
+                                       generator=vim_cmake_server.generator))
 EOF
 endfunction
 
@@ -150,10 +161,10 @@ endfunction
 
 function! vim_cmake_server#save_cache_overrides(filepath) abort
     python3 <<EOF
-cache_variables = vim.eval("s:cmake_cache_variable_all_overwrites")
+vim_cmake_server.cache_variables = vim.eval("s:cmake_cache_variable_all_overwrites")
 with open(vim.eval("a:filepath"), "wb") as output_file:
     import json
-    output_file.write(json.dumps(cache_variables, sort_keys=True, ensure_ascii=False, indent=4).encode('utf-8'))
+    output_file.write(json.dumps(vim_cmake_server.cache_variables, sort_keys=True, ensure_ascii=False, indent=4).encode('utf-8'))
 EOF
 endfunction
 
@@ -162,20 +173,20 @@ function! vim_cmake_server#load_cache_overrides(filepath) abort
     python3 <<EOF
 with open(vim.eval("a:filepath"), "rb") as input_file:
     import json
-    cache_variables = json.load(input_file, encoding='utf-8')
-    set_cache_override_function = vim.Function("vim_cmake_server#set_cache_value")
-    for cache_variable, value in cache_variables.items():
-        set_cache_override_function(cache_variable, value)
+    vim_cmake_server.cache_variables = json.load(input_file, encoding='utf-8')
+    vim_cmake_server.set_cache_override_function = vim.Function("vim_cmake_server#set_cache_value")
+    for cache_variable, value in vim_cmake_server.cache_variables.items():
+        vim_cmake_server.set_cache_override_function(cache_variable, value)
 EOF
 endfunction
 
 function! vim_cmake_server#configure() abort
     if s:communication_is_initialized == 1
         python3 <<EOF
-cache_variables = vim.bindeval("s:cmake_cache_variable_current_overwrites")
-cmake_server_adapter.post_task(
-    request.configure(cmake_server_adapter.cmake_server,
-                      cache_variables))
+vim_cmake_server.cache_variables = vim.eval("s:cmake_cache_variable_current_overwrites")
+vim_cmake_server.cmake_server_adapter.post_task(
+    vim_cmake_server.request.configure(vim_cmake_server.cmake_server_adapter.cmake_server,
+                                       vim_cmake_server.cache_variables))
 EOF
         call s:reset_current_overwrites()
         call vim_cmake_server#open_buffer()
@@ -188,8 +199,8 @@ endfunction
 function! vim_cmake_server#generate() abort
     if s:communication_is_initialized == 1
         python3 <<EOF
-cmake_server_adapter.post_task(
-    request.compute(cmake_server_adapter.cmake_server))
+vim_cmake_server.cmake_server_adapter.post_task(
+    vim_cmake_server.request.compute(vim_cmake_server.cmake_server_adapter.cmake_server))
 EOF
         call vim_cmake_server#open_buffer()
     else
